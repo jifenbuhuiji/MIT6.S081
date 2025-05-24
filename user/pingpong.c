@@ -4,5 +4,8 @@
 int main()
 {
     int pid = fork();
-    
+    if(pid == 0)
+    {
+        
+    }
 }
