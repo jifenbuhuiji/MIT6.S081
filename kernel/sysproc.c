@@ -117,7 +117,7 @@ sys_sysinfo(void)
 {
   uint64 addr;
   struct sysinfo sys;
-  if(argaddr(0, &addr) < 0)
+  if(argaddr(0, &addr) < 0)    //获取用户态传入的参数的地址
     return -1;
   struct proc *p = myproc();
   sys.freemem = freemem();
