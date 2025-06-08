@@ -105,7 +105,6 @@ static struct proc*
 allocproc(void)
 {
   struct proc *p;
-
   for(p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
     if(p->state == UNUSED) {
@@ -114,11 +113,17 @@ allocproc(void)
       release(&p->lock);
     }
   }
+ 
   return 0;
 
 found:
   p->pid = allocpid();
   p->state = USED;
+
+  uint64 pa = (uint64)kalloc();
+  struct usyscall *us = (struct usyscall*)pa;
+  us->pid = p->pid;  // 初始化PID
+  p->usyscall_pa = pa;  // 记录物理页地址，供释放时使用 
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -152,6 +157,11 @@ freeproc(struct proc *p)
 {
   if(p->trapframe)
     kfree((void*)p->trapframe);
+  if(p->usyscall_pa != 0)
+  {
+    kfree((void*)p->usyscall_pa);
+    p->usyscall_pa = 0;
+  }
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
@@ -196,6 +206,13 @@ proc_pagetable(struct proc *p)
     return 0;
   }
 
+  if(mappages(pagetable, USYSCALL, PGSIZE, p->usyscall_pa, PTE_R|PTE_U) < 0)
+  {
+    uvmunmap(pagetable, USYSCALL, 1, 0);
+    uvmfree(pagetable, 0);
+    return 0;
+  }
+
   return pagetable;
 }
 
@@ -206,6 +223,7 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
+  uvmunmap(pagetable, USYSCALL, 1, 0);
   uvmfree(pagetable, sz);
 }
 

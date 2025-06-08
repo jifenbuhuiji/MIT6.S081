@@ -75,15 +75,40 @@ sys_sleep(void)
   return 0;
 }
 
+extern  pte_t *
+walk(pagetable_t pagetable, uint64 va, int alloc);
 
-#ifdef LAB_PGTBL
 int
 sys_pgaccess(void)
 {
-  // lab pgtbl: your code here.
+  struct proc* p = myproc();
+  uint64 base;
+  int len;
+  uint64 abits;
+  argaddr(0, &base);
+  argint(1, &len);
+  argaddr(2, &abits);
+  int size = (len % 8 == 0) ? len / 8 : len / 8 + 1;
+  uint8 buff[1024] = {0};
+  // for(int i = 0; i < size; i++)
+  //   buff[i] = 0;
+  for(int i = 0; i < len; i++)
+  {
+    uint64 addr = base + i * PGSIZE;
+    pte_t *pte = walk(p->pagetable, addr, 0);
+    if(pte && (*pte & PTE_A))
+    {
+      buff[i / 8] |= 1 << (i % 8);
+      *pte &= ~PTE_A;
+    }
+  }
+  if(copyout(p->pagetable, abits, (char*)buff, size) != 0)
+  {
+    printf("copy panic\n");
+  }
   return 0;
 }
-#endif
+
 
 uint64
 sys_kill(void)
@@ -107,3 +132,5 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+
