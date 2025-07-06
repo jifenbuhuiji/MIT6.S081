@@ -33,6 +33,28 @@ trapinithart(void)
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
 //
+
+extern pte_t *
+walk(pagetable_t pagetable, uint64 va, int alloc);
+#include "memlayout.h"
+uint64 array[PHYSTOP / 4096]; 
+
+int is_cow(pagetable_t pagetable, uint64 va)       //是否为cow触发
+{
+  pte_t *pte = walk(pagetable, va, 0);
+  if(*pte & PTE_COW)
+  {
+    // printf("is cow success\n");
+    return 1;
+  }
+  else
+  {
+    // printf("is cow failed\n");
+    return 0;
+  }
+    
+}
+
 void
 usertrap(void)
 {
@@ -67,7 +89,41 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  }
+  else if(r_scause() == 15 || r_scause() == 13)
+  {
+    uint64 va = r_stval();                 //获取引发pagefault的va
+    va = PGROUNDDOWN(va);                  //向下取整，得到起始的va
+    if(is_cow(p->pagetable, va))           //是cow引发pagefault  
+    {
+      char* mem;
+      if((mem = kalloc()) == 0)            //申请一块新的物理page
+      {
+        printf("usertrap(): panic OOM\n");
+      }
+      pte_t *pte = walk(p->pagetable, va, 0);
+      int flag = PTE_FLAGS(*pte);                     //在解除映射之前获取flag，否则pte会改变
+      uint64 pa = PTE2PA(*pte);
+      memmove((void*)mem, (const void *)pa, PGSIZE);  //拷贝
+      uvmunmap(p->pagetable, va, 1, 1);               //解除原先的映射
+      flag |= PTE_W;
+      flag &= ~PTE_COW;
+      if(mappages(p->pagetable, va, PGSIZE, (uint64)mem, flag) != 0)
+      {
+        kfree((void*)mem);
+        p->killed = 1;
+      }
+      array[(uint64)mem % 4096]++;
+    }
+    else
+    {
+      printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      p->killed = 1;
+    }
+
+  } 
+  else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;

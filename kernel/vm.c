@@ -162,6 +162,9 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 // Remove npages of mappings starting from va. va must be
 // page-aligned. The mappings must exist.
 // Optionally free the physical memory.
+
+extern uint64 array[];
+
 void
 uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 {
@@ -180,7 +183,9 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
       panic("uvmunmap: not a leaf");
     if(do_free){
       uint64 pa = PTE2PA(*pte);
-      kfree((void*)pa);
+      array[pa / 4096]--;
+      if(array[pa / 4096] == 0)
+        kfree((void*)pa);
     }
     *pte = 0;
   }
@@ -297,28 +302,31 @@ uvmfree(pagetable_t pagetable, uint64 sz)
 // physical memory.
 // returns 0 on success, -1 on failure.
 // frees any allocated pages on failure.
+
+
+
 int
 uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
+//  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
-    pa = PTE2PA(*pte);
+    pa = PTE2PA(*pte);                         //获取每个page的起始物理地址
+    *pte &= ~PTE_W;                            //改为不可写
+    *pte |= PTE_COW;                           //标记为写时复制页
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
+      kfree((void *)pa);
       goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
-      goto err;
-    }
+    }                                          //执行映射
+    array[(uint64)pa / 4096]++;                //物理地址被映射次数+1
   }
   return 0;
 
@@ -340,6 +348,7 @@ uvmclear(pagetable_t pagetable, uint64 va)
   *pte &= ~PTE_U;
 }
 
+extern int is_cow(pagetable_t pagetable, uint64 va);
 // Copy from kernel to user.
 // Copy len bytes from src to virtual address dstva in a given page table.
 // Return 0 on success, -1 on error.
@@ -350,6 +359,26 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
+    if(is_cow(pagetable, va0))
+    {
+      char* mem;
+      if((mem = kalloc()) == 0)            //申请一块新的物理page
+      {
+        printf("usertrap(): panic OOM\n");
+      }
+      pte_t *pte = walk(pagetable, va0, 0);
+      int flag = PTE_FLAGS(*pte);                     //在解除映射之前获取flag，否则pte会改变
+      uint64 pa = PTE2PA(*pte);
+      memmove((void*)mem, (const void *)pa, PGSIZE);  //拷贝
+      uvmunmap(pagetable, va0, 1, 1);               //解除原先的映射
+      flag |= PTE_W;
+      flag &= ~PTE_COW;
+      if(mappages(pagetable, va0, PGSIZE, (uint64)mem, flag) != 0)
+      {
+        kfree((void*)mem);
+      }
+      array[(uint64)mem % 4096]++;
+    }
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;

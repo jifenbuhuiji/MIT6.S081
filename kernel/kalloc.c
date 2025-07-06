@@ -43,6 +43,9 @@ freerange(void *pa_start, void *pa_end)
 // which normally should have been returned by a
 // call to kalloc().  (The exception is when
 // initializing the allocator; see kinit above.)
+
+extern uint64 array[PHYSTOP / 4096]; 
+
 void
 kfree(void *pa)
 {
@@ -75,8 +78,8 @@ kalloc(void)
   if(r)
     kmem.freelist = r->next;
   release(&kmem.lock);
-
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
+  array[(uint64)r / 4096]++;
   return (void*)r;
 }
