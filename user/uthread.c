@@ -10,14 +10,47 @@
 #define STACK_SIZE  8192
 #define MAX_THREAD  4
 
+struct thread_context
+{
+  uint64 ra; 
+  uint64 sp; 
+  uint64 s0; 
+  uint64 s1; 
+  uint64 s2; 
+  uint64 s3; 
+  uint64 s4; 
+  uint64 s5; 
+  uint64 s6; 
+  uint64 s7; 
+  uint64 s8; 
+  uint64 s9; 
+  uint64 s10;
+  uint64 s11;
+};
+
+
 
 struct thread {
+  struct thread_context  thread_context;
   char       stack[STACK_SIZE]; /* the thread's stack */
   int        state;             /* FREE, RUNNING, RUNNABLE */
 };
 struct thread all_thread[MAX_THREAD];
 struct thread *current_thread;
 extern void thread_switch(uint64, uint64);
+
+/*
+创建线程，保存上下文，sp为栈顶，ra为函数的入口地址
+*/
+
+void thread_clear(struct thread* t, void(*func)(void))
+{
+  memset((void*)&t->stack, 0, STACK_SIZE);
+  memset((void*)&t->thread_context, 0, sizeof(struct thread));
+  t->state = RUNNABLE;
+  t->thread_context.sp = (uint64)((char*)&t->stack + STACK_SIZE);
+  t->thread_context.ra = (uint64)func;
+}
               
 void 
 thread_init(void)
@@ -62,9 +95,10 @@ thread_schedule(void)
      * Invoke thread_switch to switch from t to next_thread:
      * thread_switch(??, ??);
      */
-  } else
-    next_thread = 0;
-}
+    thread_switch((uint64)t, (uint64)current_thread);//第一次将all_thread[0]的上下文保存到其context结构体里
+  } else                                             //thread_a的context结构体被load到寄存器中，pc = ra，此时开始
+    next_thread = 0;                                 //执行thread_a函数；同理，第二次调度执行thread_b，此时，a的context中的ra 并不是func，而是将要执行的下一句，下次调度执行thread_c
+}                                                    
 
 void 
 thread_create(void (*func)())
@@ -76,6 +110,7 @@ thread_create(void (*func)())
   }
   t->state = RUNNABLE;
   // YOUR CODE HERE
+  thread_clear(t, func);
 }
 
 void 
@@ -157,6 +192,6 @@ main(int argc, char *argv[])
   thread_create(thread_a);
   thread_create(thread_b);
   thread_create(thread_c);
-  thread_schedule();
+  thread_schedule();      //创建完线程后启动调度器，这时的ra为exit(0)的地址
   exit(0);
 }
