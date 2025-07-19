@@ -390,13 +390,38 @@ bmap(struct inode *ip, uint bn)
   if(bn < NINDIRECT){
     // Load indirect block, allocating if necessary.
     if((addr = ip->addrs[NDIRECT]) == 0)
-      ip->addrs[NDIRECT] = addr = balloc(ip->dev);
+      ip->addrs[NDIRECT] = addr = balloc(ip->dev);           //分配间接块的addr(物理块号)
     bp = bread(ip->dev, addr);
     a = (uint*)bp->data;
     if((addr = a[bn]) == 0){
       a[bn] = addr = balloc(ip->dev);
       log_write(bp);
     }
+    brelse(bp);
+    return addr;
+  }
+  bn -= NINDIRECT;
+
+  if(bn < NINDIRECT * NINDIRECT)
+  {
+    if((addr = ip->addrs[NDIRECT + 1]) == 0)
+      ip->addrs[NDIRECT + 1] = addr = balloc(ip->dev);   //申请第一层间接块
+    bp = bread(ip->dev, addr);                           //读第一块间接块的cache buffer
+    a = (uint*)bp->data;
+    int preindex = bn / NINDIRECT;
+    int nexindex = bn % NINDIRECT;
+    if((addr = a[preindex]) == 0){
+      a[preindex] = addr = balloc(ip->dev);                   //申请第二级间接块
+      log_write(bp); 
+    }
+    struct buf *nexbuf = bread(ip->dev, addr);          //读第二级间接块的cache buffer
+    a = (uint*)nexbuf->data;
+    if((addr = a[nexindex]) == 0)
+    {
+      a[nexindex] = addr = balloc(ip->dev);             //申请数据块
+      log_write(nexbuf);
+    }
+    brelse(nexbuf);
     brelse(bp);
     return addr;
   }
@@ -430,6 +455,30 @@ itrunc(struct inode *ip)
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
+  }
+
+  if(ip->addrs[NDIRECT + 1])
+  {
+    bp = bread(ip->dev, ip->addrs[NDIRECT + 1]);
+    a = (uint*)bp->data;
+    for(j = 0; j < NINDIRECT; j++)
+    {
+      if(a[j])
+      {
+        struct buf* nexbuf = bread(ip->dev, a[j]);
+        uint *b = (uint*)nexbuf->data;
+        for(int k = 0; k < NINDIRECT; k++)
+        {
+          if(b[k])
+            bfree(ip->dev, b[k]);
+        }
+        brelse(nexbuf);
+        bfree(ip->dev, a[j]);
+      }
+    }
+    brelse(bp);
+    bfree(ip->dev, ip->addrs[NDIRECT + 1]);
+    ip->addrs[NDIRECT + 1] = 0;
   }
 
   ip->size = 0;

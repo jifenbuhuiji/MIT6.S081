@@ -316,6 +316,32 @@ sys_open(void)
     }
   }
 
+  int count = 0;
+  while(ip->type == T_SYMLINK && !(omode & O_NOFOLLOW))
+  {
+    char target[MAXPATH];
+    if(readi(ip, 0, (uint64)target, 0, MAXPATH) < 0)    //读取ip inode对应的data block
+    {
+      iunlockput(ip);
+      end_op();
+      return -1;
+    }
+    iunlockput(ip);
+    if((ip = namei(target)) == 0)
+    {
+      end_op();
+      return -1;
+    }
+    ilock(ip);
+    count++;
+    if(count > 10)
+    {
+      iunlockput(ip);
+      end_op();
+      return -1;
+    }
+  }
+
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
     iunlockput(ip);
     end_op();
@@ -483,4 +509,38 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+
+uint64 
+sys_symlink(void)
+{
+  char taget[MAXPATH], path[MAXPATH];
+
+  if(argstr(0, taget, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
+    return -1;
+  int ret = 0;
+  begin_op();
+  struct inode* ip;
+  if((ip = namei(path)) != 0)
+  {
+    ret = -1;
+    goto final;
+  }
+
+  ip = create(path, T_SYMLINK, 0, 0);
+  if(ip == 0)
+  {
+    ret = -1;
+    goto final;
+  }
+
+  if(writei(ip, 0, (uint64)taget, 0, MAXPATH) < 0)
+  {
+    ret = -1;
+  }
+  iunlockput(ip);
+
+final:
+  end_op();
+  return ret;
 }
