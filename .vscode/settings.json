@@ -1,0 +1,13 @@
+{
+    "files.associations": {
+        "fcntl.h": "c",
+        "user.h": "c",
+        "types.h": "c",
+        "param.h": "c",
+        "stat.h": "c",
+        "file.h": "c",
+        "spinlock.h": "c",
+        "riscv.h": "c",
+        "fs.h": "c"
+    }
+}

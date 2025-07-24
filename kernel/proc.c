@@ -140,7 +140,6 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
-
   return p;
 }
 
@@ -312,6 +311,13 @@ fork(void)
   release(&wait_lock);
 
   acquire(&np->lock);
+  for (int i = 0; i < NVMA; i++) {
+    np->vmas[i].valid = 0;
+    if (p->vmas[i].valid) { // 复制vma entry
+      memmove(&np->vmas[i], &p->vmas[i], sizeof(struct vma));
+      filedup(p->vmas[i].f); // 增加引用次数
+    }
+  }
   np->state = RUNNABLE;
   release(&np->lock);
 
@@ -336,6 +342,9 @@ reparent(struct proc *p)
 // Exit the current process.  Does not return.
 // An exited process remains in the zombie state
 // until its parent calls wait().
+
+#include "fcntl.h"
+#include "file.h"
 void
 exit(int status)
 {
@@ -350,6 +359,16 @@ exit(int status)
       struct file *f = p->ofile[fd];
       fileclose(f);
       p->ofile[fd] = 0;
+    }
+  }
+ for (int i = 0; i < NVMA; i++) {
+    if (p->vmas[i].valid) {
+      if (p->vmas[i].flags & MAP_SHARED) {
+        filewrite(p->vmas[i].f, p->vmas[i].addr, p->vmas[i].length);
+      }
+      fileclose(p->vmas[i].f);
+      uvmunmap(p->pagetable, p->vmas[i].addr, p->vmas[i].length / PGSIZE, 1);
+      p->vmas[i].valid = 0;
     }
   }
 
